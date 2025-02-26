@@ -2,8 +2,8 @@
 
 namespace App\Controller;
 
+use App\Service\PackingSlipService;
 use App\Service\ShipmentService;
-use setasign\Fpdi\Fpdi;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -12,6 +12,7 @@ final class PakbonController extends AbstractController
 {
     public function __construct(
         private readonly ShipmentService $shipmentService,
+        private readonly PackingSlipService $packingSlipService,
     ) {
     }
 
@@ -24,123 +25,17 @@ final class PakbonController extends AbstractController
 
         $shipment = $this->shipmentService->createShipment($order, $companyId, $brandId);
 
-        $shippingLabelFilePath = $shipment['data']['labels']['a4']['offset_1'];
-        $fileContent = file_get_contents($shippingLabelFilePath);
+        // There are 4 different offsets for the shipping label
+        // 'offset_1' is aligned to the top right of the page and will be used as a template for the packing slip
 
-        if ($fileContent === false) {
-            throw $this->createNotFoundException('Could not download the PDF file.');
+        if (empty($shipment['data']['labels']['a4']['offset_1'])) {
+            throw $this->createNotFoundException('Shipment label not found.');
         }
 
-        $tempFilePath = tempnam(sys_get_temp_dir(), 'shipping_label_') . '.pdf';
-        file_put_contents($tempFilePath, $fileContent);
+        $packingSlip = $this->packingSlipService->generatePackingSlip($order, $shipment['data']['labels']['a4']['offset_1']);
 
-        $pdf = new Fpdi();
-        $pdf->AddPage();
-
-        $pdf->setSourceFile($tempFilePath);
-        $tplId = $pdf->importPage(1);
-        $pdf->useTemplate($tplId);
-
-        $offset = 10;
-        $yPosition = 10;
-
-        // Title
-        $pdf->SetFont('Arial', 'B', 24); // Set font size and style
-        $lineHeight = 20;
-        $pdf->SetXY($offset, $yPosition); // Position the title at the top left
-        $pdf->Cell(0, $lineHeight, 'Pakbon', 0, 1, 'L'); // 'L' aligns the text to the left
-        $yPosition += $lineHeight;
-
-        // Order number
-        $pdf->SetFont('Arial', 'B', 12);
-        $lineHeight = 8;
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, 'Bestelnummer:', 0, 1, 'L');
-        $yPosition += $lineHeight;
-
-        $pdf->SetFont('Arial', '', 10);
-        $lineHeight = 6;
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, $order['number'], 0, 1, 'L');
-        $yPosition += $lineHeight;
-
-        // Invoice address
-        $yPosition += 5;
-        $pdf->SetFont('Arial', 'B', 12);
-        $lineHeight = 8;
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, 'Factuuradres:', 0, 1, 'L');
-        $yPosition += $lineHeight;
-
-        $pdf->SetFont('Arial', '', 10);
-        $lineHeight = 6;
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, $order['billing_address']['name'], 0, 1, 'L');
-        $yPosition += $lineHeight;
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, $order['billing_address']['street'] . ' ' . $order['billing_address']['housenumber'], 0, 1, 'L');
-        $yPosition += $lineHeight;
-        if (!empty($order['billing_address']['address_line_2'])) {
-            $pdf->SetXY($offset, $yPosition);
-            $pdf->Cell(0, $lineHeight, $order['billing_address']['address_line_2'], 0, 1, 'L');
-            $yPosition += $lineHeight;
-        }
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, $order['billing_address']['zipcode'] . ' ' . $order['billing_address']['city'], 0, 1, 'L');
-        $yPosition += $lineHeight;
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, $order['billing_address']['country'], 0, 1, 'L');
-        $yPosition += $lineHeight;
-
-        // Delivery address
-        $yPosition += 5;
-        $pdf->SetFont('Arial', 'B', 12);
-        $lineHeight = 8;
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, 'Bezorgadres:', 0, 1, 'L');
-        $yPosition += $lineHeight;
-
-        $pdf->SetFont('Arial', '', 10);
-        $lineHeight = 6;
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, $order['delivery_address']['name'], 0, 1, 'L');
-        $yPosition += $lineHeight;
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, $order['delivery_address']['street'] . ' ' . $order['delivery_address']['housenumber'], 0, 1, 'L');
-        $yPosition += $lineHeight;
-        if (!empty($order['delivery_address']['address_line_2'])) {
-            $pdf->SetXY($offset, $yPosition);
-            $pdf->Cell(0, $lineHeight, $order['delivery_address']['address_line_2'], 0, 1, 'L');
-            $yPosition += $lineHeight;
-        }
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, $order['delivery_address']['zipcode'] . ' ' . $order['delivery_address']['city'], 0, 1, 'L');
-        $yPosition += $lineHeight;
-        $pdf->SetXY($offset, $yPosition);
-        $pdf->Cell(0, $lineHeight, $order['delivery_address']['country'], 0, 1, 'L');
-
-
-        // Order lines are placed statically below the shipping label
-        $pdf->SetFont('Arial', 'B', 12);
-        $pdf->SetXY($offset, 150);
-        $pdf->Cell(60, 10, 'Product', 1);
-        $pdf->Cell(30, 10, 'Aantal', 1);
-        $pdf->Cell(40, 10, 'SKU', 1);
-        $pdf->Cell(60, 10, 'EAN', 1, 1);
-
-        $pdf->SetFont('Arial', '', 12);
-
-        foreach ($order['order_lines'] as $line) {
-            $pdf->Cell(60, 10, $line['name'], 1);
-            $pdf->Cell(30, 10, $line['amount_ordered'], 1, 0, 'R');
-            $pdf->Cell(40, 10, $line['sku'], 1, 0, 'R');
-            $pdf->Cell(60, 10, $line['ean'], 1, 1, 'R');
-        }
-
-
-        // Return the PDF as a response
         return new Response(
-            $pdf->Output(),
+            $packingSlip,
             Response::HTTP_OK,
             [
                 'Content-Type' => 'application/pdf',
@@ -179,13 +74,13 @@ final class PakbonController extends AbstractController
                     'amount_ordered' => 2,
                     'name' => 'Jeans - Black - 36',
                     'sku' => 69205,
-                    'ean' =>  '8710552295268',
+                    'ean' => '8710552295268',
                 ],
                 [
                     'amount_ordered' => 1,
                     'name' => 'Sjaal - Rood Oranje',
                     'sku' => 25920,
-                    'ean' =>  '3059943009097',
+                    'ean' => '3059943009097',
                 ]
             ]
         ];
