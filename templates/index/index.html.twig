@@ -1,0 +1,11 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Pakbon{% endblock %}
+
+{% block body %}
+    <h1 class="mb-4 mt-4">Pakbon genereren</h1>
+
+    <div>
+        <a target="_blank" href="{{ path('pakbon') }}" class="btn btn-primary">Genereer pakbon</a>
+    </div>
+{% endblock %}
